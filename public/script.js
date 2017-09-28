@@ -63,7 +63,7 @@ var dataHandler = (function(){
 
     groupOrderBookPerPrice: function(data){
       //PER PRICE AND EXACT TIME
-      groups = {};
+      var groups = {};
 
       for(let i = 0; i < data.length; i++){
         var order = data[i];
@@ -74,8 +74,21 @@ var dataHandler = (function(){
       return groups;
     },
 
-    replacePriceGroupByDataPoint: function(priceGroups){
-      
+    groupOrderBookPerDataPoint: function(data){
+      //group by time and price
+      var groups = {};
+
+      for(let i = 0 ; i < data.length; i++){
+        var price = data[i].Price;
+        var time = data[i].TimeStamp;
+        var name = price + ":" + Date.parse(time);
+
+        if(!(name in groups))
+          groups[name] = [];
+        groups[name].push(data[i]);
+      }
+
+      return groups;
     }
   };
 })();
@@ -91,21 +104,23 @@ function init(){
       success: function (data) {
         
         var processed = dataHandler.groupOrderBookPerCandle(candleTime, data);
-        console.log("percandle:", Object.assign({}, processed));
+       // console.log("percandle:", Object.assign({}, processed));
         dataHandler.groupCandlesPerPrice(processed);
-     //   console.log(dataHandler.groupOrderBookPerPrice(data));
+        var dataPoints = dataHandler.groupOrderBookPerDataPoint(data);
+        console.log(dataPoints);
 
+        
         var bounds = new SimpleRect(
-          0, 
-          processed.length,
+          Math.min(...Object.keys(dataPoints).map(d => parseInt(d.split(':')[1]))), 
+          Math.max(...Object.keys(dataPoints).map(d => parseInt(d.split(':')[1]))),
           Math.min(...data.map(d => d.Price)),//minimum of all prices
           Math.max(...data.map(d => d.Price)));//maximum of all prices
         
 
-        console.log("processed:", processed);
-        console.log("bounds:", bounds);
+        // console.log("processed:", processed);
+         console.log("bounds:", bounds);
 
-        draw(processed, bounds);
+        draw(dataPoints, bounds);
       }
   });
 }
@@ -116,36 +131,29 @@ function draw(data, bounds){
   var points = [];
   var colors = [];
 
-  for(candleNb in data){
-    let candleGroup = data[candleNb];
-    for(price in candleGroup){
-      let entryGroup = candleGroup[price];
-      let point = new Point(candleNb, price);
-      point = transformPoint(new Point(candleNb, price), bounds, $('canvas').width(), $('canvas').height());
-      var volume = entryGroup.map(f => f.Quantity).reduce((prev, next) => prev + next);
+  for(prop in data){
+    var dataPoint = data[prop];
+    var split = prop.split(':');
+    var color;
 
-      var color;
-      var sellVolume = entryGroup.filter(f => f.OrderType == "SELL").map(f => f.Quantity);
-      if(sellVolume.length != 0){
-        sellVolume = sellVolume.reduce((p, n)=> p + n);
-        var percentSell = sellVolume / volume;
-        color = lerpColor('#53B987', '#EB4D5C', percentSell);
-      }else{
-        color = '#53B987';
-      }
-      
-
-
-      point.y *= -1;
-      prices.push(price);
-      volumes.push(volume);
-      points.push(point);
-      
-     // console.log(entryGroup);//faire un degradé entre rouge/vert en fonction du volume d'achat vs volume de vente
-      colors.push(color);
-     // console.log((candleNb*candleTime) + ":" + price + ":", entryGroup);
-      //candleNb is X, price is Y
+    var volume = dataPoint.map(d => d.Quantity).reduce((p, n) => p + n);
+    var sellVolume = dataPoint.filter(d => d.OrderType == "SELL").map(d => d.Quantity);
+    if(sellVolume.length != 0){
+      sellVolume = sellVolume.reduce((p, n) => p + n);
+      var sellPercent = sellVolume / volume;
+      color = lerpColor('#53B987', '#EB4D5C', sellPercent);
+    }else{
+      color = '#53B987';
     }
+    var price = split[0];
+    var point = new Point(parseFloat(split[1]), parseFloat(split[0]));
+    point = transformPoint(point, bounds, $('canvas').width(), $('canvas').height());
+    point.y *= -1;
+
+    volumes.push(volume);
+    prices.push(price);
+    points.push(point);
+    colors.push(color);
   }
   //TODO put smaller dots on top 
 
@@ -164,7 +172,6 @@ function draw(data, bounds){
         baseRadius: normalizedVolumes[i]*50
       },
       mouseover: function(layer){
-        console.log(layer)
         $(this).animateLayer(layer, {
           radius: layer.data.baseRadius*1.2,
           opacity: .5
